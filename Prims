@@ -1,0 +1,119 @@
+#!/usr/bin/perl
+
+use strict;
+#use warnings;
+
+# Complete the prims function below.
+sub prims {     
+    my ($n, $edges_ref, $start) = @_;      
+    my @input = @{ $edges_ref };
+
+    my @Wtransformed = &transform(\@input);
+    &prim(\@Wtransformed);
+    
+sub transform{
+    my $D = shift;
+    my $size = @$D;
+    my @Wtransformed  = ();
+    my $k = 1;
+    
+    while($k < $size)
+    {
+        for (my $i = 1; $i < $size; $i++)
+        {
+            $Wtransformed[$k][$i] =0;
+        }
+        $k++;
+    }
+    
+    $k = 1;
+    
+    while($k < $size)
+    {
+        for (my $i = 0; $i < $size; $i++)
+        {
+            if ($D->[$i][0] == $k)
+            {
+                $Wtransformed[$k][$D->[$i][1]] = $D->[$i][2];
+            }
+            if ($D->[$i][1] == $k)
+            {
+                $Wtransformed[$k][$D->[$i][0]] = $D->[$i][2];
+            }
+        }
+        $k++;
+    }
+    return @Wtransformed;    
+}
+
+sub prim{
+    
+    my ($i,$total_cost);
+    my (@visited, @cost, @parents);
+    my $D = shift;
+    my $size = scalar @$D;    
+
+    ### setzte alle auf nicht besucht
+    for($i=0; $i<$size ;$i++)
+    {
+        $visited[$i] = 0;
+        $cost[$i] = 100001;
+    }
+    
+    ### der erste hat cost = 0, damit er als start gewählt wird
+    $cost[$start] = 0;
+    $parents[$start] = -1;
+
+    while(1)
+    {
+        #print "überprüfe \n";
+        my $mincost = 100001;
+        my $u;
+        ### suche node, mit dem minimalen Gewicht, welches noch nicht besucht wurde
+        # select node that has minimum weight
+        for($i=1; $i<$size ;$i++)
+        {
+            if($visited[$i] == 0 && $cost[$i] < $mincost )
+            {     
+                 #min gewicht
+                 $mincost = $cost[$i];
+                 #stelle des min gewicht
+                 ### u = spalte
+                 $u = $i;
+            }
+        } 
+
+        # all visited
+        ### wenn for schleife keine werte findet, dann fertig 
+        if($mincost == 100001)
+        {    
+            return $total_cost;
+            #print "total weight of MST is: ".$total_cost."\n";
+            last;
+        }
+        ### ansonsten das gefundene minimale gewicht zum maximal gewicht hinzufügen
+        else
+        {
+            $total_cost += $mincost;
+        }
+        ### besuchte stelle wird als besucht markiert
+        $visited[$u] = 1;
+        
+        ### finde edge mit geringstem gewicht
+        for($i=1; $i<$size ;$i++)
+        {    
+            ### weiter, weil 999999999999 nicht gewollt
+            # # if($visited[$i] || $D->[$u][$i] == 999999999999 )
+            # # {
+                # # next;
+            # # }
+            ### wenn Gewicht zwischen 0 und 999999999999 und kleiner als das gewicht für diese stelle
+            # if(0 < $D->[$u][$i] && $D->[$u][$i] < 999999999999 && $D->[$u][$i] < $cost[$i] )
+            if(0 < $D->[$u][$i] && $D->[$u][$i] < $cost[$i] )
+            {    
+                $cost[$i] = $D->[$u][$i];        # set minimum weight from edge node
+                $parents[$i] = $u;               # set nearest node
+            }    
+        }
+    }
+}
