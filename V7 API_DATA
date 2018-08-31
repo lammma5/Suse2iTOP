@@ -518,7 +518,6 @@ package public;
 			{
 				$data = "none";
 			}
-			print $data."\n";
 		}
 		print "\n";	  
 	}
