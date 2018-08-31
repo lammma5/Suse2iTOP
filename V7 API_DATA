@@ -508,18 +508,20 @@ package public;
 		# $SWAP = "";
     }
 	
-	sub correct_and_print_data
+	sub print_data
 	{
-		foreach my $data ($NAME, $BRAND, $BRAND_ID, $MODEL, $MODEL_ID, $SERIALNUMBER, $ASSETTAG, $RAM, $OSFAMILY_ID, $OSVERSION, $OSVERSION_ID, $IP, $MASK, $ORG_ID, $LOC_ID, $CPU, $CPU_ID, $NUMBER_OF_PHYSICAL_CORES_PER_CPU, $NUMBER_OF_PHYSICAL_CPU, $isPhysicalMachine) 
+		### Print the array/result
+		foreach my $data ($NAME, $BRAND_ID, $MODEL_ID, $SERIALNUMBER, $ASSETTAG, $RAM, $OSVERSION_ID, $IP, $MASK, $ORG_ID, $LOC_ID, $CPU_ID, $NUMBER_OF_PHYSICAL_CORES_PER_CPU, $NUMBER_OF_PHYSICAL_CPU) 
+		# foreach my $data ($NAME) 
 		{				 
-			### Change the variable to none if it is 0, undefined or is equal to ""
-			if (!($data) or $data eq "Not Specified" or $data eq "No Asset Tag" or $data eq "None" or $data eq "System Asset Tag") 
+			#Change the variable to none if it is 0, undefined or is equal to ""
+			if (!($data)) 
 			{
 				$data = "none";
 			}
-				print $data."\n";
+			print $data."\n";
 		}
-		print "\n";
+		print "\n";	  
 	}
 	
 ##------------------------------------End of the script------------------------------------##
