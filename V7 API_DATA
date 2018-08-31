@@ -101,6 +101,7 @@ foreach my $RunOnServer (@$systems)
 }
 
 ### Wait until the scripts had run
+### man sollte noch darauf warten, bis die remote commands ausgeführt sind
 sleep 60;
 
 # $counter = 0;
