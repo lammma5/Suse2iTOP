@@ -133,9 +133,9 @@ foreach my $system (@$systems)
 ### List all inactive Systems
 print "Inactive Systems are:"."\n";
 foreach my $inactive (@$inactiveSystems) 
-	{
+{
 	print $inactive->{'name'}."\n"; 
-	}
+}
 	
 ### End of the session
 $client->call('auth.logout', $session);
@@ -178,7 +178,7 @@ package SuseManager;
 		{
 		    my $locAsset	= index($serverString, ") (chassis:"); 
 		    my $locBoard 	= index($serverString, ") (board:");
-            my $locSystem = index($serverString, ") (system:");
+            	my $locSystem = index($serverString, ") (system:");
 			$SERIALNUMBER = substr($serverString,$locSystem+11,length($serverString)-$locSystem-12);	
 		    $ASSETTAG 		= substr($serverString,$locAsset+12,$locBoard - $locAsset-12);
 			
@@ -280,7 +280,7 @@ package SuseManager;
 		$ID_CPU{$_[0]} = $ScriptRunCPU;
 		
 		#print $ScriptRun."\n";
-		}
+	}
 	
 	
 	sub get_cpudata
@@ -305,7 +305,6 @@ package SuseManager;
 				$NUMBER_OF_PHYSICAL_CORES_PER_CPU = $CPUinfo[1];
 				$NUMBER_OF_PHYSICAL_CORES_PER_CPU =~ s/ +//g;
 				$NUMBER_OF_PHYSICAL_CPU = $CPUinfo[2];
-
 		}
 	}	
 	
