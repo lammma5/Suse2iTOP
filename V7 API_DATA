@@ -1,0 +1,524 @@
+#!/usr/bin/perl
+
+##--------------------------------Begin of the script------------------------------------##
+
+use strict;
+use warnings;
+
+use Frontier::Client;
+use DBI;
+
+
+############################
+# Initialize all variables #
+############################
+ 
+my $NAME = "";
+my $SERIALNUMBER = "";
+my $ASSETTAG = "";
+my $BRAND = "";
+my $BRAND_ID = "";
+my $MODEL = "";
+my $MODEL_ID = "";
+my $OSVERSION = "";
+my $OSVERSION_ID = "";
+my $OSFAMILY_ID = "86";
+my $IP = "";
+my $MASK = "";
+my $ORG_ID = "";
+my $LOC_ID = "";
+my $RAM = "";
+my $networkaddress = "";
+my $CPU = "";
+my $CPU_ID = "";
+my $NUMBER_OF_PHYSICAL_CPU = 0;
+my $NUMBER_OF_PHYSICAL_CORES_PER_CPU = "";
+my $CPU_DATA = "";
+
+# my $KERNEL = "";
+# my $SWAP = "";
+
+### Variable to check if it is a Physical Machine
+my $isPhysicalMachine = "Virtual Machine"; 
+
+my $counter = 0;
+my %ID_CPU;
+
+###############
+# Login data  #
+###############
+
+###SuseManager login data
+my $HOST = '';
+my $user = '???';
+my $pass = '???';
+
+#### iTOP login data
+my $hostname = "";
+my $u	 = "???";
+my $p	 = "???";
+my $db   = "itop";
+
+
+##########################
+# Login into the systems #
+##########################
+
+### create session key for SUSE Manager API
+my $client = new Frontier::Client(url => "http://$HOST/rpc/api");
+my $session = $client->call('auth.login',$user, $pass);
+
+### login into connect to iTOP
+my $ConITOPDB = DBI->connect("DBI:mysql:database=$db;host=$hostname", $u, $p) or die "ERROR: Could not establish the connection to iTOP-database!";
+
+
+########################################
+# Search systems that are synchronized #
+########################################
+
+### Search for all ACTIVE minions/clients of the Manager
+my $systems = $client->call('system.listActiveSystems', $session) or die "ERROR: Could not establish the connection to SUSE Manager API!";
+
+### Search only for physical Server (for comparing to active systems)
+my $physicalSystems = $client->call('system.listPhysicalSystems', $session) or die "ERROR: Could not establish the connection to SUSE Manager API!";
+
+### Search for inactive Server (Information about Systems that are not accessible)
+my $inactiveSystems = $client->call('system.listInactiveSystems', $session) or die "ERROR: Could not establish the connection to SUSE Manager API!";
+
+######################################################
+# Run scripts, find data and send it for each server #
+######################################################
+ 
+foreach my $RunOnServer (@$systems) 
+{    
+	### Run scripts to get cpu info
+    SuseManager::start_scripts($RunOnServer);
+	$counter++;
+	if ($counter > 2)
+	{
+		last;
+	}
+}
+
+### Wait until the scripts had run
+sleep 60;
+
+# $counter = 0;
+foreach my $system (@$systems) 
+{
+	### Get a collection of data
+    SuseManager::get_pcdata($system);
+	SuseManager::get_cpudata($system);
+	
+	### Correct and/or print data for each server
+	public::correct_and_print_data();
+	
+	### Send data to iTOP
+	# iTOP::checkPR();
+	
+	### Reset variables
+	public::resetVariables();
+
+	## Skip after a number of server   		
+    $counter++;
+	if ($counter > 2)
+	{
+	  last;
+	}
+}
+
+# print $counter."\n"."\n";
+		
+### List all inactive Systems
+print "Inactive Systems are:"."\n";
+foreach my $inactive (@$inactiveSystems) 
+	{
+	print $inactive->{'name'}."\n"; 
+	}
+	
+### End of the session
+$client->call('auth.logout', $session);
+$ConITOPDB->disconnect(); 
+
+##-----------------------------Funcitons-----------------------##
+
+package SuseManager;
+
+    sub get_pcdata
+	{	
+		############################
+		# Get hardware information #
+		############################
+		
+	    $NAME = $_[0]->{'name'};
+		#print $NAME."\n";
+		
+        my $dmi = $client->call('system.getDmi', $session, $_[0]->{'id'});
+        $BRAND = $dmi->{'vendor'};
+		
+		### Maybe a change of the BRAND String to find the IDs in ITOP is necessary
+		my $DeleteString1 = " // Phoenix Technologies Ltd.";
+		my $DeleteString2 = " // American Megatrends Inc.";
+		
+		if($BRAND eq "// Phoenix Technologies Ltd.")
+		{
+			$BRAND =~ s/$DeleteString1//g;
+		}
+		if($BRAND eq "// American Megatrends Inc.")
+		{
+			$Brand =~ s/$DeleteString2//g;
+		}
+		
+		$MODEL = $dmi->{'product'};
+		
+		### Grep serial number and asset-tag from the string 
+		my $serverString = $dmi->{'asset'};
+		if ($serverString) 
+		{
+		    my $locAsset	= index($serverString, ") (chassis:"); 
+		    my $locBoard 	= index($serverString, ") (board:");
+            my $locSystem = index($serverString, ") (system:");
+			$SERIALNUMBER = substr($serverString,$locSystem+11,length($serverString)-$locSystem-12);	
+		    $ASSETTAG 		= substr($serverString,$locAsset+12,$locBoard - $locAsset-12);
+			
+		}
+		else 
+		{ 
+			$SERIALNUMBER = "";
+			$ASSETTAG = "";
+		}
+		#print "Serial u. Asset: \n	$SERIALNUMBER	$ASSETTAG\n";
+		
+		
+		##########################
+		# Get Memory (RAM in GB) #
+		##########################
+		
+        my $memory = $client->call('system.getMemory', $session, $_[0]->{'id'});        
+		$RAM = int ($memory->{'ram'} / 1000);
+		#$SWAP = $memory->{'swap'};
+		#$KERNEL = $client->call('system.getRunningKernel', $session, $_[0]->{'id'});
+		
+		###############################################
+		# Get the OS version using the activation key #
+		###############################################
+		
+        my $activationkey  = $client->call('system.listActivationKeys', $session, $_[0]->{'id'});
+        foreach my $info (@$activationkey) 
+	    {   
+		    # Delete the first two letters "1-"
+            $OSVERSION = substr($info,2,length($info));
+			$OSVERSION =~ s/-/ /g;
+			$OSVERSION .= " 64Bit";
+			
+			if($OSVERSION eq "CENTOS7 64Bit")
+			{
+				$OSVERSION = 'CentOS 4/5 or later (64-bit)';
+			}
+		}
+		
+        ### Check if it is a physical machine 
+		for my $physicalserver (@$physicalSystems) 
+		{  
+		    my $NamePhysical = $physicalserver->{'name'};
+		    #print $NamePhysical;
+			if ($NAME eq $NamePhysical) 
+			{
+				$isPhysicalMachine = "Physical Machine";
+			}
+		}
+			
+		###############################
+        # Get the network information #
+		###############################
+		
+		### Find default ip
+        my $ipaddress  = $client->call('system.getNetwork', $session, $_[0]->{'id'});
+		$IP = $ipaddress->{'ip'};
+		#print "$IP \n\n";
+		
+		### Find the netmask by using the default ip
+        my $network  = $client->call('system.get_Network_Devices', $session, $_[0]->{'id'});
+        for my $netInfo (@$network) 
+	    {   
+	        ## Check which ip interface is default and get the related netmask
+		    if ($IP eq $netInfo->{'ip'}) 
+		    {
+		        $MASK = $netInfo->{'netmask'};
+		    }
+        }
+		 
+        ### Generate networkaddress	 
+	    if($IP && $MASK)
+		{
+			public::networkaddress($IP, $MASK);
+        }
+		
+		
+		##########################################################################################
+		# Find the IDs of the organisation, the location, the brand, the model and the OS version#
+		##########################################################################################
+
+		iTOP::find_id($networkaddress, $BRAND, $MODEL, $OSVERSION);
+	}
+	
+
+	sub start_scripts
+	{
+		use POSIX qw(strftime);
+		
+		### Find cpu information
+		my $script1 = 'cat /proc/cpuinfo | grep "model name" | head -1 | cut -d ":" -f2;
+		               cat /proc/cpuinfo | grep "cpu cores" | uniq | cut -d ":" -f2;
+					   cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l | cut -d ":" -f2';
+		
+		my $date_time = $client->date_time(strftime("%Y%m%dT%H:%M:%S", localtime(time()+1)));
+		
+		### Run the remote command
+		my $ScriptRunCPU = $client->call('system.scheduleScriptRun', $session, $_[0]->{'id'}, "root", "root", '30', $script1, $date_time);
+		$ID_CPU{$_[0]} = $ScriptRunCPU;
+		
+		#print $ScriptRun."\n";
+		}
+	
+	
+	sub get_cpudata
+	{ 
+			my $ScriptResultCPU = $client->call('system.getScriptResults', $session, $ID_CPU{$_[0]});
+			for my $result (@$ScriptResultCPU)
+			{
+				my $CpuData = $result->{'output'};
+				
+				### Prepare the String for Split
+                $CpuData =~ s/stdout://g;
+				$CpuData =~ s/ +/ /g;
+				$CpuData =~ s/ 0 / /g;
+				$CpuData =~ s/^[^ ]* //;
+				#print $CpuData;
+				
+				### Split the String every new line 
+				my @CPUinfo = split (/\n/, $CpuData);
+				
+				### Get the Model, Cores and Count from the Array
+				$CPU = $CPUinfo[0];
+				$NUMBER_OF_PHYSICAL_CORES_PER_CPU = $CPUinfo[1];
+				$NUMBER_OF_PHYSICAL_CORES_PER_CPU =~ s/ +//g;
+				$NUMBER_OF_PHYSICAL_CPU = $CPUinfo[2];
+
+		}
+	}	
+	
+package iTOP;	
+	
+	sub find_id
+	{
+		### find org_id by looking for the networkadress
+		### if the ORG_ID is empty then assign 211 which means "Unknown_org"
+		### get the LOCATION-, BRAND-, MODEL-, OSVERSION-ID	
+	
+		########### ORGANIZATION ###########			
+		my $sORGID = $ConITOPDB->prepare
+		(" SELECT org_id FROM view_Subnet WHERE ip = ? ");
+		$sORGID->execute($networkaddress);
+		while (my @row= $sORGID->fetchrow_array())
+		{
+			$ORG_ID = $row[0];
+		}
+		if ($ORG_ID eq "")
+		{
+			$ORG_ID = "211";
+		}
+		#printf("$ORG_ID\n");
+	
+		########### LOCATION ###########
+		my $sLOCID = $ConITOPDB->prepare
+		("SELECT id FROM view_Location WHERE org_id = ? ");			
+		$sLOCID->execute($ORG_ID);
+		while (my @row= $sLOCID->fetchrow_array())
+		{ 
+			if ($ORG_ID eq "211")
+			{
+				$LOC_ID = ""; 
+			}
+			else 
+			{
+				$LOC_ID	= $row[0];
+			}	
+		}
+		#printf("$LOC_ID\n");
+		
+		########### BRAND ###########
+		if ($BRAND) {
+			my $sBRANDID = $ConITOPDB->prepare
+								("
+								SELECT id 
+								FROM view_Brand
+								WHERE name = '$BRAND'
+								");
+			$sBRANDID->execute();
+			while (my @row= $sBRANDID->fetchrow_array())
+			{
+				$BRAND_ID = $row[0];
+		}
+		#printf("$BRAND_ID\n");
+		}
+	
+		########### MODEL ###########	
+		if ($MODEL) {
+			my $sMODELID = $ConITOPDB->prepare
+								("
+								SELECT id 
+								FROM view_Model 
+								WHERE name = '$MODEL'
+								");
+			$sMODELID->execute();
+			while (my @row= $sMODELID->fetchrow_array())
+			{
+				$MODEL_ID = $row[0];
+			}
+			#printf("$MODEL_ID\n");
+		}
+		
+		
+		########### OSVERSION ########### 
+		my $sOSVERSIONID = $ConITOPDB->prepare
+								("	
+								SELECT id 
+								FROM view_OSVersion 
+								WHERE name = '$OSVERSION'
+								");	
+		$sOSVERSIONID->execute();
+		while (my @row= $sOSVERSIONID->fetchrow_array())
+		{
+			$OSVERSION_ID = $row[0];
+		}
+		#printf("$OSVERSION_ID\n");
+	
+		#print "Loc u. Org: \n	$LOC_ID		$ORG_ID\n\n";
+		#print "brand_model:\n	$BRAND	$BRAND_ID\n	$MODEL	$MODEL_ID\n 	$OSVERSION	$OSVERSION_ID\n";
+		
+		########### CPU ###########
+		my $sCPUID = $ConITOPDB->prepare
+								(" 
+								SELECT id 
+								FROM view_Cpu 
+								WHERE Cpu_Type = ?
+								");		
+		$sCPUID->execute($CPU);
+		while (my @row= $sCPUID->fetchrow_array())
+		{
+			$CPU_ID = $row[0];
+		}
+	}
+	
+	sub checkPR 
+	{               
+		########### CHECK_PR ###########
+		my $sCHECK_PR = $ConITOPDB->prepare
+								("	
+								SELECT primary_key
+								FROM synchro_data_server_14
+								WHERE primary_key = '$NAME'
+								");
+		$sCHECK_PR->execute();
+		my $row= $sCHECK_PR->fetchrow_array();
+					
+		if (not defined $row)
+		{	
+			print "INSERT von Server $NAME\n";
+			my $insert = $ConITOPDB->prepare(
+				"INSERT INTO synchro_data_server_14 (primary_key, name, org_id, location_id, serialnumber, asset_number, brand_id, \
+				model_id, osfamily_id, osversion_id, ram) \
+				VALUES ('$NAME','$NAME','$ORG_ID','$LOC_ID','$SERIALNUMBER','$ASSETTAG','$BRAND_ID','$MODEL_ID','$OSFAMILY_ID', \
+				'$OSVERSION_ID', '$RAM')
+				");														
+			#$insert->execute();		
+		}
+		else
+		{	
+			print "UPDATE von Server $NAME\n";
+			my $update = $ConITOPDB->prepare(	
+				"UPDATE synchro_data_server_14 
+				SET name = '$NAME',
+				org_id = '$ORG_ID',
+				location_id = '$LOC_ID',
+				serialnumber = '$SERIALNUMBER',
+				asset_number = '$ASSETTAG',
+				brand_id = '$BRAND_ID', 
+				model_id = '$MODEL_ID',
+				osfamily_id = '$OSFAMILY_ID', 
+				osversion_id = '$OSVERSION_ID',
+				ram = '$RAM',
+				WHERE  primary_key = '$NAME'
+				");
+			#$update->execute();		
+		}	
+	}
+	
+	
+package public;
+
+	sub networkaddress 
+	{
+		my @NETZADRESSE = ();
+		
+		### Split the IP at . into Elements of @IP_SPLIT
+		### Split the MASK at . into Elements of @MASK_SPLIT	
+
+		my @IP_SPLIT = split(/\./,$_[0]);
+		#print "@IP_SPLIT\n";
+		my @MASK_SPLIT = split(/\./,$_[1]);		
+		#print "@MASK_SPLIT\n";
+
+		### Adding 0 to IP_SPLIT in order to convert it -for Perl- into a number
+		### The MASK_SPLIT will also be seen as a number after the previous 
+
+		$NETZADRESSE[0] = ($IP_SPLIT[0]+0) & $MASK_SPLIT[0];
+		$NETZADRESSE[1] = ($IP_SPLIT[1]+0) & $MASK_SPLIT[1];
+		$NETZADRESSE[2] = ($IP_SPLIT[2]+0) & $MASK_SPLIT[2];	
+		$NETZADRESSE[3] = ($IP_SPLIT[3]+0) & $MASK_SPLIT[3];
+		
+		$networkaddress = join ('.',$NETZADRESSE[0],$NETZADRESSE[1],$NETZADRESSE[2],$NETZADRESSE[3]); 
+		#print "Networkadress: $networkaddress \n";
+    }	 
+	
+	sub resetVariables
+	{
+		$NAME = "";
+		$SERIALNUMBER = "";
+		$ASSETTAG = "";
+		$BRAND = "";
+		$MODEL = "";
+		$OSVERSION = "";
+		$IP = "";
+		$MASK = "";
+		$ORG_ID = "";
+		$LOC_ID = "";
+		$RAM = "";
+		$CPU = "";
+		$CPU_ID = "";
+		$NUMBER_OF_PHYSICAL_CPU = 0;
+		$NUMBER_OF_PHYSICAL_CORES_PER_CPU = "";
+		$BRAND_ID = "";
+		$MODEL_ID = "";
+		$isPhysicalMachine = "Virtual Machine";
+		$OSVERSION_ID = "";
+		# $KERNEL = "";
+		# $SWAP = "";
+    }
+	
+	sub correct_and_print_data
+	{
+		foreach my $data ($NAME, $BRAND, $BRAND_ID, $MODEL, $MODEL_ID, $SERIALNUMBER, $ASSETTAG, $RAM, $OSFAMILY_ID, $OSVERSION, $OSVERSION_ID, $IP, $MASK, $ORG_ID, $LOC_ID, $CPU, $CPU_ID, $NUMBER_OF_PHYSICAL_CORES_PER_CPU, $NUMBER_OF_PHYSICAL_CPU, $isPhysicalMachine) 
+		{				 
+			### Change the variable to none if it is 0, undefined or is equal to ""
+			if (!($data) or $data eq "Not Specified" or $data eq "No Asset Tag" or $data eq "None" or $data eq "System Asset Tag") 
+			{
+				$data = "none";
+			}
+				print $data."\n";
+		}
+		print "\n";
+	}
+	
+##------------------------------------End of the script------------------------------------##
